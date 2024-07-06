@@ -27,3 +27,9 @@ jobs:
 
       - name: Run Puppeteer script
         run: node your-script.js
+
+      - name: Upload screenshot
+        uses: actions/upload-artifact@v3
+        with:
+          name: screenshot
+          path: screenshot.png

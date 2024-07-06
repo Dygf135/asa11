@@ -1,90 +1,227 @@
-const { executablePath } = require("puppeteer");
-const puppeteer = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const { executablePath } = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
 
 async function run() {
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-infobars",
-      "--window-position=0,0",
-      "--ignore-certifcate-errors",
-      "--ignore-certifcate-errors-spki-list",
-      "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    ],
-    executablePath: executablePath(),
-  });
+    const browser = await puppeteer.launch({
+        headless: false,
+        devtools: true,
+        args: [
+            '--allow-external-pages',
+            '--allow-third-party-modules',
+            '--data-reduction-proxy-http-proxies',
+            '--disable-web-security',
+            '--enable-automation',
+            '--disable-features=IsolateOrigins,site-per-process,SitePerProcess',
+            '--flag-switches-begin --disable-site-isolation-trials --flag-switches-end',
+        ],
+        executablePath: executablePath(),
+    });
 
-  const page = await browser.newPage();
-  await page.setViewport({
-    width: 1920,
-    height: 1080,
-    deviceScaleFactor: 1,
-  });
+    const page = await browser.newPage();
+    await page.goto("https://nibmworldwide.com/exams/mis", { waitUntil: 'networkidle0' });
 
-  await page.goto("https://patrickhlauke.github.io/recaptcha/", {
-    waitUntil: "networkidle0",
-  });
+    // Solver code
+    await page.evaluate(() => {
+        import("https://cdn.jsdelivr.net/npm/axios@1.1.2/dist/axios.min.js")
 
-  // Wait for the reCAPTCHA iframe to load
-  await page.waitForSelector('iframe[src*="api2/anchor"]');
+        function qSelectorAll(selector) {
+            return document.querySelector('iframe[src*="api2/anchor"]').contentWindow.document.querySelectorAll(selector);
+        }
 
-  const frames = await page.frames();
-  const recaptchaFrame = frames.find(frame => frame.url().includes('api2/anchor'));
+        function qSelector(selector) {
+            return document.querySelector('iframe[src*="api2/anchor"]').contentWindow.document.querySelector(selector);
+        }
 
-  if (!recaptchaFrame) {
-    console.log("Could not find the reCAPTCHA frame");
+        function ifqSelector(selector) {
+            return document.querySelector('iframe[src*="api2/bframe"]').contentWindow.document.querySelector(selector);
+        }
+
+        var solved = false;
+        var checkBoxClicked = false;
+        var waitingForAudioResponse = false;
+        // Node Selectors
+        const CHECK_BOX = ".recaptcha-checkbox-border";
+        const AUDIO_BUTTON = "#recaptcha-audio-button";
+        const PLAY_BUTTON = ".rc-audiochallenge-play-button .rc-button-default";
+        const AUDIO_SOURCE = "#audio-source";
+        const IMAGE_SELECT = "#rc-imageselect";
+        const RESPONSE_FIELD = ".rc-audiochallenge-response-field";
+        const AUDIO_ERROR_MESSAGE = ".rc-audiochallenge-error-message";
+        const AUDIO_RESPONSE = "#audio-response";
+        const RELOAD_BUTTON = "#recaptcha-reload-button";
+        const RECAPTCHA_STATUS = "#recaptcha-accessible-status";
+        const DOSCAPTCHA = ".rc-doscaptcha-body";
+        const VERIFY_BUTTON = "#recaptcha-verify-button";
+        const MAX_ATTEMPTS = 5;
+        var requestCount = 0;
+        var recaptchaLanguage = qSelector("html").getAttribute("lang");
+        var audioUrl = "";
+        var recaptchaInitialStatus = qSelector(RECAPTCHA_STATUS) ? qSelector(RECAPTCHA_STATUS).innerText : ""
+        var serversList = ["https://engageub.pythonanywhere.com", "https://engageub1.pythonanywhere.com"];
+        var latencyList = Array(serversList.length).fill(10000);
+        // Check for visibility && Click the check box
+        function isHidden(el) {
+            return (el.offsetParent === null)
+        }
+
+        async function getTextFromAudio(URL) {
+            var minLatency = 100000;
+            var url = "";
+
+            // Selecting the last/latest server by default if latencies are equal
+            for (let k = 0; k < latencyList.length; k++) {
+                if (latencyList[k] <= minLatency) {
+                    minLatency = latencyList[k];
+                    url = serversList[k];
+                }
+            }
+
+            requestCount = requestCount + 1;
+            URL = URL.replace("recaptcha.net", "google.com");
+            if (recaptchaLanguage.length < 1) {
+                console.log("Recaptcha Language is not recognized");
+                recaptchaLanguage = "en-US";
+            }
+            console.log("Recaptcha Language is " + recaptchaLanguage);
+
+            axios({
+                method: "POST",
+                url: url,
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                data: "input=" + encodeURIComponent(URL) + "&lang=" + recaptchaLanguage,
+                timeout: 60000,
+            }).then((response) => {
+                console.log("Response::" + response.data);
+                try {
+                    if (!!response && !!response.data) {
+                        var responseText = response.data;
+                        console.log("responseText")
+                        // Validate Response for error messages or html elements
+                        if (responseText == "0" || responseText.includes("<") || responseText.includes(">") || responseText.length < 2 || responseText.length > 50) {
+                            // Invalid Response, Reload the captcha
+                            console.log("Invalid Response. Retrying..");
+                        } else if (!!ifqSelector(AUDIO_SOURCE) && !!ifqSelector(AUDIO_SOURCE).src && audioUrl == ifqSelector(AUDIO_SOURCE).src && !!ifqSelector(AUDIO_RESPONSE)
+                            && !ifqSelector(AUDIO_RESPONSE).value && !!ifqSelector(VERIFY_BUTTON)) {
+                            ifqSelector(AUDIO_RESPONSE).value = responseText;
+                            ifqSelector(VERIFY_BUTTON).click();
+                        } else {
+                            console.log("Could not locate text input box")
+                        }
+                        waitingForAudioResponse = false;
+                    }
+
+                } catch (err) {
+                    console.log(err.message);
+                    console.log("Exception handling response. Retrying..");
+                    waitingForAudioResponse = false;
+                }
+            }).catch((e) => {
+                console.log(e);
+                waitingForAudioResponse = false;
+            });
+        }
+
+        async function pingTest(url) {
+            var start = new Date().getTime();
+            axios({
+                method: "GET",
+                url: url,
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                data: "",
+                timeout: 15000
+            }).then((response) => {
+                console.log(response)
+                if (!!response && !response.data && response.data == "0") {
+                    var end = new Date().getTime();
+                    var milliseconds = end - start;
+                    console.log(milliseconds)
+                    // For large values use Hashmap
+                    for (let i = 0; i < serversList.length; i++) {
+                        if (url == serversList[i]) {
+                            latencyList[i] = milliseconds;
+                        }
+                    }
+                }
+            });
+        }
+
+        if (qSelector(CHECK_BOX)) {
+            qSelector(CHECK_BOX).click();
+        } else if (window.location.href.includes("bframe")) {
+            for (let i = 0; i < serversList.length; i++) {
+                pingTest(serversList[i]);
+            }
+        }
+
+        // Solve the captcha using audio
+        var startInterval = setInterval(function () {
+            try {
+                if (!checkBoxClicked && !!qSelector(CHECK_BOX) && !isHidden(qSelector(CHECK_BOX))) {
+                    //console.log("checkbox clicked");
+                    qSelector(CHECK_BOX).click();
+                    checkBoxClicked = true;
+                }
+                // Check if the captcha is solved
+                if (!!qSelector(RECAPTCHA_STATUS) && (qSelector(RECAPTCHA_STATUS).innerText != recaptchaInitialStatus)) {
+                    solved = true;
+                    console.log("SOLVED");
+                    clearInterval(startInterval);
+                }
+                if (requestCount > MAX_ATTEMPTS) {
+                    console.log("Attempted Max Retries. Stopping the solver");
+                    solved = true;
+                    clearInterval(startInterval);
+                }
+                if (solved) {
+                    console.log("Captcha Solved or Max retries attempted");
+                    clearInterval(startInterval);
+                }
+                // Solve Audio Challenge
+                if (!!qSelector(AUDIO_BUTTON) && !isHidden(qSelector(AUDIO_BUTTON)) && !solved && !waitingForAudioResponse) {
+                    //console.log("audio button clicked");
+                    qSelector(AUDIO_BUTTON).click();
+                } else if (!!ifqSelector(PLAY_BUTTON) && !isHidden(ifqSelector(PLAY_BUTTON)) && !solved && !waitingForAudioResponse) {
+                    ifqSelector(PLAY_BUTTON).click();
+                } else if (!!ifqSelector(AUDIO_SOURCE) && !!ifqSelector(AUDIO_SOURCE).src && !solved && !waitingForAudioResponse) {
+                    audioUrl = ifqSelector(AUDIO_SOURCE).src;
+                    waitingForAudioResponse = true;
+                    getTextFromAudio(ifqSelector(AUDIO_SOURCE).src);
+                } else if (!!ifqSelector(AUDIO_ERROR_MESSAGE) && !isHidden(ifqSelector(AUDIO_ERROR_MESSAGE)) && !solved && !waitingForAudioResponse) {
+                    ifqSelector(RELOAD_BUTTON).click();
+                } else if (!!ifqSelector(AUDIO_RESPONSE) && !!ifqSelector(AUDIO_RESPONSE).value && !!ifqSelector(VERIFY_BUTTON) && !solved && !waitingForAudioResponse) {
+                    ifqSelector(VERIFY_BUTTON).click();
+                } else if (!!qSelector(CHECK_BOX) && qSelector(CHECK_BOX).getAttribute("aria-checked") == "true") {
+                    solved = true;
+                    console.log("SOLVED");
+                    clearInterval(startInterval);
+                }
+                else if (!!qSelector(RECAPTCHA_STATUS) && qSelector(RECAPTCHA_STATUS).innerText.includes("multiple correct")) {
+                    ifqSelector(RELOAD_BUTTON).click();
+                }
+            } catch (error) {
+                console.log(error.message);
+            }
+        }, 1000)
+    });
+
+    // Wait for the captcha to be solved
+    await page.waitForFunction(() => {
+        return document.querySelector('iframe[src*="api2/anchor"]').contentWindow.document.querySelector('#recaptcha-accessible-status')?.innerText.includes("You are verified")
+    }, { timeout: 60000 });
+
+    // Capture a screenshot after solving captcha
+    await page.screenshot({ path: 'screenshot.png' });
+
     await browser.close();
-    return;
-  }
-
-  // Click the checkbox
-  await recaptchaFrame.click('.recaptcha-checkbox-border');
-
-  // Wait for the audio challenge to appear
-  await page.waitForSelector('iframe[src*="api2/bframe"]');
-  const audioChallengeFrame = frames.find(frame => frame.url().includes('api2/bframe'));
-
-  if (!audioChallengeFrame) {
-    console.log("Could not find the audio challenge frame");
-    await browser.close();
-    return;
-  }
-
-  // Click the audio challenge button
-  await audioChallengeFrame.waitForSelector('#recaptcha-audio-button');
-  await audioChallengeFrame.click('#recaptcha-audio-button');
-
-  // Wait for the audio to be available
-  await audioChallengeFrame.waitForSelector('#audio-source');
-
-  // Get the audio URL
-  const audioUrl = await audioChallengeFrame.$eval('#audio-source', el => el.src);
-
-  console.log("Audio URL:", audioUrl);
-
-  // Here you would typically send this URL to your audio solving service
-  // For demonstration, we'll just wait a bit and then input a dummy response
-
-  await new Promise(resolve => setTimeout(resolve, 5000));  // Wait 5 seconds
-
-  // Input a dummy response
-  await audioChallengeFrame.type('#audio-response', 'dummy response');
-
-  // Click verify
-  await audioChallengeFrame.click('#recaptcha-verify-button');
-
-  // Wait a bit for the verification to complete
-  await new Promise(resolve => setTimeout(resolve, 5000));
-
-  // Take a screenshot
-  await page.screenshot({ path: "screenshot.png", fullPage: true });
-  console.log("Screenshot taken after CAPTCHA attempt.");
-
-  await browser.close();
 }
 
-run().catch(console.error);
+run().catch(error => {
+    console.error(error);
+    process.exit(1);
+});
